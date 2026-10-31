@@ -1,0 +1,88 @@
+// (C) 2006, LOSER. Modified: 2-band Linkwitz-Riley 4th-order (24dB/oct) crossover.
+// NO WARRANTY IS GRANTED. THIS PLUG-IN IS PROVIDED ON AN "AS IS" BASIS, WITHOUT
+// WARRANTY OF ANY KIND. NO LIABILITY IS GRANTED, INCLUDING, BUT NOT LIMITED TO,
+// ANY DIRECT OR INDIRECT,  SPECIAL,  INCIDENTAL OR CONSEQUENTIAL DAMAGE ARISING
+// OUT OF  THE  USE  OR INABILITY  TO  USE  THIS PLUG-IN,  COMPUTER FAILTURE  OF
+// MALFUNCTION INCLUDED.  THE USE OF THE SOURCE CODE,  EITHER  PARTIALLY  OR  IN
+// TOTAL, IS ONLY GRANTED,  IF USED IN THE SENSE OF THE AUTHOR'S INTENTION,  AND
+// USED WITH ACKNOWLEDGEMENT OF THE AUTHOR. FURTHERMORE IS THIS PLUG-IN A  THIRD
+// PARTY CONTRIBUTION,  EVEN IF INCLUDED IN REAPER(TM),  COCKOS INCORPORATED  OR
+// ITS AFFILIATES HAVE NOTHING TO DO WITH IT.  LAST BUT NOT LEAST, BY USING THIS
+// PLUG-IN YOU RELINQUISH YOUR CLAIM TO SUE IT'S AUTHOR, AS WELL AS THE CLAIM TO
+// ENTRUST SOMEBODY ELSE WITH DOING SO.
+desc:2-Band Splitter (Linkwitz-Riley 4th-order, 24dB/oct)
+desc:2-Band Splitter (Splits In Low:1+2,High:3+4) [LOSER-mod]
+//tags: processing routing
+//author: LOSER (modified for steep LR4 2-band split)
+slider1:1000<20,20000,1>Crossover (Hz)
+in_pin:left input
+in_pin:right input
+out_pin:low output left
+out_pin:low output right
+out_pin:high output left
+out_pin:high output right
+
+@init
+ext_tail_size=-1;
+cDenorm = 10^-30;
+dSign = 1;
+
+// Direct-form-I biquad, called as instanceName.biquad(x)
+function biquad(x)
+  instance(x1, x2, y1, y2, b0, b1, b2, a1, a2)
+  local(y)
+(
+  y = b0*x + b1*x1 + b2*x2 - a1*y1 - a2*y2;
+  x2 = x1; x1 = x;
+  y2 = y1; y1 = y;
+  y;
+);
+
+@slider
+// Clamp frequency to a sane, stable range
+freq = max(min(slider1, srate*0.49), 20);
+
+w0 = 2*$pi*freq/srate;
+cw = cos(w0);
+sw = sin(w0);
+Q  = 0.7071067811865476; // Butterworth Q; cascaded x2 per side = LR4 (24dB/oct)
+alpha = sw/(2*Q);
+a0 = 1 + alpha;
+
+// Lowpass (RBJ cookbook, normalized by a0)
+b0lp = ((1-cw)/2)/a0;
+b1lp = (1-cw)/a0;
+b2lp = b0lp;
+a1c  = (-2*cw)/a0;      // same a1 for LP and HP
+a2lp = (1-alpha)/a0;
+
+// Highpass
+b0hp = ((1+cw)/2)/a0;
+b1hp = (-(1+cw))/a0;
+b2hp = b0hp;
+a2hp = a2lp;            // same a2 for LP and HP
+
+// Two cascaded stages per channel = 4th order (LR4) lowpass
+lpL1.b0=b0lp; lpL1.b1=b1lp; lpL1.b2=b2lp; lpL1.a1=a1c; lpL1.a2=a2lp;
+lpL2.b0=b0lp; lpL2.b1=b1lp; lpL2.b2=b2lp; lpL2.a1=a1c; lpL2.a2=a2lp;
+lpR1.b0=b0lp; lpR1.b1=b1lp; lpR1.b2=b2lp; lpR1.a1=a1c; lpR1.a2=a2lp;
+lpR2.b0=b0lp; lpR2.b1=b1lp; lpR2.b2=b2lp; lpR2.a1=a1c; lpR2.a2=a2lp;
+
+// Two cascaded stages per channel = 4th order (LR4) highpass
+hpL1.b0=b0hp; hpL1.b1=b1hp; hpL1.b2=b2hp; hpL1.a1=a1c; hpL1.a2=a2hp;
+hpL2.b0=b0hp; hpL2.b1=b1hp; hpL2.b2=b2hp; hpL2.a1=a1c; hpL2.a2=a2hp;
+hpR1.b0=b0hp; hpR1.b1=b1hp; hpR1.b2=b2hp; hpR1.a1=a1c; hpR1.a2=a2hp;
+hpR2.b0=b0hp; hpR2.b1=b1hp; hpR2.b2=b2hp; hpR2.a1=a1c; hpR2.a2=a2hp;
+
+@sample
+// Tiny alternating-sign offset to prevent denormal stalls between stages
+dSign = -dSign;
+d = dSign*cDenorm;
+
+s0 = spl0 + d;
+s1 = spl1 + d;
+
+spl0 = lpL2.biquad(lpL1.biquad(s0));
+spl1 = lpR2.biquad(lpR1.biquad(s1));
+spl2 = hpL2.biquad(hpL1.biquad(s0));
+spl3 = hpR2.biquad(hpR1.biquad(s1));
